@@ -52,7 +52,8 @@ def main():
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=False
+        drop_last=False,
+        persistent_workers=True
     )
     
     # 3. 按照训练配置动态重建 ACT 策略网络结构
