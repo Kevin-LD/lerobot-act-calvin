@@ -1,0 +1,19 @@
+# 数据集
+data/*
+# 不忽略 Python 脚本
+!data/*.py
+
+# IDE
+.vscode/
+
+# python
+__pycache__/
+
+# wandb
+wandb/
+
+# runs
+runs/
+
+# temp
+memo.txt
