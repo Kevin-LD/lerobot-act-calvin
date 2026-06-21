@@ -14,16 +14,6 @@ class CalvinDataset(Dataset):
     def __init__(self, data_root=None, action_horizon=16, cache_size=16, transform=None, split="train", val_ratio=0.1, seed=42, env_name="B"):
         """
         CALVIN 数据集通用底座
-        
-        Args:
-            data_root (str): 数据根目录。若为 None 则根据 env_name 自动拼接
-            action_horizon (int): 动作预测时间步长
-            cache_size (int): 缓存的 Parquet 文件数量
-            transform (callable): 图像预处理变换
-            split (str): "train" 或 "val" 模式
-            val_ratio (float): 验证集所占 Episode 的比例
-            seed (int): 确保划分可复现的随机种子
-            env_name (str): 环境标识符，如 "B" 或 "D"
         """
         self.env_name = env_name.upper()
         
@@ -192,25 +182,104 @@ class CalvinDDataset(CalvinDataset):
             env_name="D"
         )
 
+class CalvinMultiEnvDataset(Dataset):
+    """
+    通用多环境联合数据集包装器
+    """
+    def __init__(self, env_names=["A", "B", "C"], data_root=None, **kwargs):
+        """
+        Args:
+            env_names (list): 需要合并的环境标识符列表，如 ["A", "B", "C"]
+            data_root (str): 若不指定，子数据集会自动寻找各自对应的 splitA, splitB, splitC 文件夹
+            **kwargs: 透传给子数据集的通用参数 (action_horizon, split, val_ratio, seed 等)
+        """
+        self.env_names = [env.upper() for env in env_names]
+        self.datasets = []
+        
+        print(f"\n================ 开始构建多环境联合数据集: {self.env_names} ================")
+        for env in self.env_names:
+            # 允许为不同环境设定独立的根目录，如果不给，单环境类内部会自动拼接出 splitA/splitB/splitC
+            env_data_root = None if data_root is None else os.path.join(data_root, f"split{env}")
+            
+            sub_dataset = CalvinDataset(
+                data_root=env_data_root,
+                env_name=env,
+                **kwargs
+            )
+            self.datasets.append(sub_dataset)
+            
+        self.lengths = [len(ds) for ds in self.datasets]
+        self.total_frames = sum(self.lengths)
+        print(f" [MultiEnv] 联合数据集构建完毕！各环境帧数分布: {dict(zip(self.env_names, self.lengths))} | 总计可用帧数: {self.total_frames}\n")
+
+    def __len__(self):
+        return self.total_frames
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= self.total_frames:
+            raise IndexError("Dataset index out of range")
+        
+        # 依靠步长区间进行动态路由寻址
+        target_idx = idx
+        for sub_dataset in self.datasets:
+            if target_idx < len(sub_dataset):
+                return sub_dataset[target_idx]
+            target_idx -= len(sub_dataset)
+            
+        raise IndexError("Dataset index out of range")
+
+    # ----- 兼容层：将底层所有子数据集的核心元数据铺平暴露 -----
+    @property
+    def global_indices(self):
+        """平铺合并所有子环境的全局帧映射"""
+        combined = []
+        for ds in self.datasets:
+            combined.extend(ds.global_indices)
+        return combined
+
+    @property
+    def episode_files(self):
+        """平铺合并所有子环境的文件追踪列表"""
+        combined = []
+        for ds in self.datasets:
+            combined.extend(ds.episode_files)
+        return combined
+
+
+class CalvinABCDataset(CalvinMultiEnvDataset):
+    """专门面向 A, B, C 三环境联合训练的数据加载子类"""
+    def __init__(self, data_root=None, action_horizon=16, cache_size=16, transform=None, split="train", val_ratio=0.1, seed=42):
+        super().__init__(
+            env_names=["A", "B", "C"],
+            data_root=data_root,
+            action_horizon=action_horizon,
+            cache_size=cache_size,
+            transform=transform,
+            split=split,
+            val_ratio=val_ratio,
+            seed=seed
+        )
+
 
 if __name__ == "__main__":
     print("====== 开始对重构后的通用架构进行多环境交叉测试 ======")
     
     try:
-        # 测试 1: 验证环境 B 模块
+        # 测试 1: 验证 B 模块
         print("\n--- 正在测试环境 B (CalvinBDataset) ---")
         train_dataset_B = CalvinBDataset(action_horizon=16, split="train", val_ratio=0.1)
         print(f"环境 B 成功建立！总帧数: {len(train_dataset_B)}")
         
-        # 测试 2: 验证环境 D 模块
-        print("\n--- 正在测试新扩展的环境 D (CalvinDDataset) ---")
-        # 提示：如果测试时本地还没有下载或配置好环境 D，这里会精准捕获错误并打印异常提示
-        train_dataset_D = CalvinDDataset(action_horizon=16, split="train", val_ratio=0.1)
-        print(f"环境 D 成功建立！总帧数: {len(train_dataset_D)}")
+        # 测试 2: 验证多环境联合加载器 (CalvinABCDataset)
+        print("\n--- 正在测试 A, B, C 多环境联合数据集 (CalvinABCDataset) ---")
+        # 提示：请确保本地当前目录下或数据根目录下存在 splitA, splitB, splitC 文件夹
+        train_dataset_ABC = CalvinABCDataset(action_horizon=16, split="train", val_ratio=0.1)
+        print(f"联合数据集 ABC 成功建立！总长度: {len(train_dataset_ABC)}")
         
-        dataloader_D = DataLoader(train_dataset_D, batch_size=4, shuffle=True, num_workers=2)
-        for batch in dataloader_D:
-            print("\n【测试成功】环境 D 成功产出标准规范化数据包！")
+        # 测试 3: 验证联合 DataLoader 行为
+        dataloader_ABC = DataLoader(train_dataset_ABC, batch_size=4, shuffle=True, num_workers=2)
+        for batch in dataloader_ABC:
+            print("\n【测试成功】联合数据集 ABC 成功产出标准规范化数据包！")
             print(f"  qpos 形状:         {batch['qpos'].shape}")
             print(f"  actions 形状:      {batch['actions'].shape}")
             print(f"  action_is_pad 形状:{batch['action_is_pad'].shape}")
