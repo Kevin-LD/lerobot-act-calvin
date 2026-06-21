@@ -1,0 +1,31 @@
+infrastructure:
+  seed: 42
+  device: "cuda"
+  save_dir: "runs/run"  # 实验脚本会自动在 save_dir 后添加时间戳以区分不同实验
+
+dataset:
+  data_root: "data/splitB"
+  action_horizon: 16 # ACT 预测的时间步长
+  batch_size: 64
+  num_workers: 16
+
+model:
+  name: "act"
+  hidden_dim: 512
+  dim_feedforward: 3200
+  backbone: "resnet18"
+  kl_weight: 5     # VAE 的 KL 散度损失权重
+  lr: 1e-4            # Transformer 的学习率
+  lr_backbone: 1e-5   # 视觉骨干网络的学习率
+  weight_decay: 1e-4
+  num_epochs: 3
+  eval_freq: 1000
+
+wandb:
+  project: "lerobot-act-calvin"
+  mode: "online"      # 可选 'online' 或 'offline'
+
+val:
+  # 评估模式选择：'none'（基线，第一步评估）或 'ema'（时序滑动平均集成评估）
+  mode: "none"
+  k: 0.1

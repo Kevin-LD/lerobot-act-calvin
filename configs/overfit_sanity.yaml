@@ -1,0 +1,35 @@
+infrastructure:
+  seed: 42
+  device: "cuda"
+  save_dir: "runs/run_sanity_overfit"
+
+dataset:
+  data_root: "data/splitB"
+  action_horizon: 1
+  batch_size: 1
+  num_workers: 2       # 小数据量下减少 worker 数量以降低开销
+
+model:
+  name: "act"
+  hidden_dim: 512
+  dim_feedforward: 3200
+  backbone: "resnet18"
+  kl_weight: 0.5
+  lr: 1e-4
+  lr_backbone: 1e-5
+  weight_decay: 1e-4
+  num_epochs: 100
+  eval_freq: 10
+
+wandb:
+  project: "lerobot-act-calvin-sanity"
+  mode: "online"
+
+# 显式引入过拟合控制开关
+training_mode:
+  overfit_single_batch: true
+
+val:
+  # 评估模式选择：'none'（基线，第一步评估）或 'ema'（时序滑动平均集成评估）
+  mode: "none"
+  k: 0.1
