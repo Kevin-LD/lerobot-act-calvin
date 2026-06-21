@@ -11,7 +11,7 @@ import wandb
 from datetime import datetime
 from tqdm import tqdm
 
-from data.dataset import CalvinBDataset
+from data.dataset import CalvinBDataset, CalvinABCDataset
 from lerobot.policies.act.modeling_act import ACTPolicy, ACTConfig
 from utils.utils import build_lerobot_batch, evaluate_policy, evaluate_policy_ema, create_policy_feature
 
@@ -55,9 +55,19 @@ def main():
         config=config
     )
     
+    env_mode = config["dataset"].get("env_mode", "B").upper()
+    if env_mode == "ABC":
+        dataset_cls = CalvinABCDataset
+        print(" [Mode: ABC] 检测到多环境联合训练配置，正在组装 A + B + C 数据流...")
+    elif env_mode == "B":
+        dataset_cls = CalvinBDataset
+        print(" [Mode: B] 检测到单一环境训练配置，正在加载环境 B 数据流...")
+    else:
+        raise ValueError(f" 无法识别的 env_mode: '{env_mode}'。合法的选项为 ['B', 'ABC']")
+
     print("Loading dataset...")
-    base_train_dataset = CalvinBDataset(
-        data_root=config["dataset"]["data_root"],
+    base_train_dataset = dataset_cls(
+        data_root=config["dataset"].get("data_root"),
         action_horizon=config["dataset"]["action_horizon"],
         split="train",
         val_ratio=0.1,
@@ -73,8 +83,8 @@ def main():
         drop_last = False
         print(f" Sanity Check: 过拟合模式已开启。训练集与验证集均指向前 {batch_size} 个相同样本。")
     else:
-        base_val_dataset = CalvinBDataset(
-            data_root=config["dataset"]["data_root"],
+        base_val_dataset = dataset_cls(
+            data_root=config["dataset"].get("data_root"),
             action_horizon=config["dataset"]["action_horizon"],
             split="val",
             val_ratio=0.1,
@@ -91,7 +101,8 @@ def main():
         shuffle=shuffle,
         num_workers=config["dataset"]["num_workers"],
         pin_memory=True,
-        drop_last=drop_last
+        drop_last=drop_last,
+        persistent_workers=True
     )
     
     # 注意：进行时序滑动集成(EMA)时，测试集DataLoader的shuffle必须为False
@@ -101,7 +112,8 @@ def main():
         shuffle=False,
         num_workers=config["dataset"]["num_workers"],
         pin_memory=True,
-        drop_last=False
+        drop_last=False,
+        persistent_workers=True
     )
     
     print("Initializing LeRobot ACT Policy with current API schema...")
@@ -236,7 +248,7 @@ def main():
 
     # 如果总步数不是评估频率的整数倍，在整个训练完全结束时，无条件执行最后一次强行验证
     if global_step % eval_freq != 0:
-        print(f"\n🏁 训练双重循环已终结，捕获到尾部余量步数。执行全场终局决战验证 (Final Step: {global_step})... 模式: 【{val_mode.upper()}】")
+        print(f"\n 训练结束。执行最终验证 (Final Step: {global_step})... 模式: 【{val_mode.upper()}】")
         
         if val_mode == "ema":
             avg_val_action_error = evaluate_policy_ema(
