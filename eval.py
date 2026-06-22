@@ -7,9 +7,8 @@ import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# 导入共享的组件
 from data.dataset import CalvinDDataset
-from utils.utils import evaluate_policy, create_policy_feature, evaluate_policy_ema
+from utils.utils import create_policy_feature, evaluate_policy_ema, evaluate_policy_dimension_wise
 from lerobot.policies.act.modeling_act import ACTPolicy, ACTConfig
 
 def parse_args():
@@ -86,7 +85,7 @@ def main():
     # 4. 导入已训练完成的 Checkpoint 权重
     print(f"Loading trained weights from: {args.checkpoint}")
     if not os.path.exists(args.checkpoint):
-        raise FileNotFoundError(f"❌ 未找到指定的权重文件: {args.checkpoint}")
+        raise FileNotFoundError(f"未找到指定的权重文件: {args.checkpoint}")
         
     checkpoint_data = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     
@@ -109,22 +108,28 @@ def main():
     print(f"评估模式配置: 【{args.mode.upper()}】 | 总计待测试帧数: {len(test_dataset_D)} | 总 Batch 步数: {len(test_dataloader)}")
     
     if args.mode == "none":
-        # 模式一：复用原有的标准单步离线评估流
-        avg_action_error_D = evaluate_policy(
+        # 模式一：基础单步前向评估（不使用历史预测，仅评估当前帧的动作预测误差），包括分维度输出
+        avg_action_error_D, dim_errors_D = evaluate_policy_dimension_wise(
             policy=policy,
             dataloader=test_dataloader,
             device=device,
             desc="Cross-Eval Split D (None Mode)"
-        )
-    else:
-        # 模式二：时序滑动平均集成评估
-            avg_action_error_D = evaluate_policy_ema(
-                policy=policy,
-                dataloader=test_dataloader,
-                device=device,
-                k=args.k,
-                desc="Cross-Eval Split D (EMA)"
             )
+    else:
+        # 模式二：时序滑动平均集成评估，不包括分维度输出
+        avg_action_error_D = evaluate_policy_ema(
+            policy=policy,
+            dataloader=test_dataloader,
+            device=device,
+            k=args.k,
+            desc="Cross-Eval Split D (EMA)"
+        )
+
+    dim_names = [
+        "X (Translation)", "Y (Translation)", "Z (Translation)",
+        "Roll (Rotation)", "Pitch (Rotation)", "Yaw (Rotation)",
+        "Gripper (Open/Close)"
+    ]
 
     # 6. 打印核心结果
     print("\n" + "="*60)
@@ -135,6 +140,13 @@ def main():
     print(f" 动作集成模式:   {args.mode.upper()} (k={args.k if args.mode=='ema' else 'N/A'})")
     print(f" 测试样本总量:   {len(test_dataset_D)} 帧")
     print(f" 🎯 泛化平均动作误差 (Avg Action L1 Error): {avg_action_error_D:.5f}")
+    print("-"*60)
+    print("            📊 DIMENSION-WISE ACTION ERROR REPORT           ")
+    print("-"*60)
+    for name, err in zip(dim_names, dim_errors_D):
+        print(f" 📍 {name:<22} 平均绝对误差 (L1): {err:.5f}")
+    print("-"*60)
+    print(f" 🎯 基础前向综合平均误差 (Base L1 Check): {dim_errors_D.mean():.5f}")
     print("="*60)
     
     # 将测试结果备份
@@ -143,8 +155,14 @@ def main():
         f.write(f"Checkpoint: {args.checkpoint}\n")
         f.write(f"Mode: {args.mode} (k={args.k})\n")
         f.write(f"Dataset D Frames: {len(test_dataset_D)}\n")
-        f.write(f"Avg Action L1 Error on D: {avg_action_error_D:.5f}\n")
-    print(f"💡 结果评估报告已自动同步留存至: {report_path}\n")
+        f.write(f"Avg Action L1 Error on D: {avg_action_error_D:.5f}\n\n")
+        
+        f.write("--- Dimension-wise Error Detail ---\n")
+        for name, err in zip(dim_names, dim_errors_D):
+            f.write(f"{name}: {err:.5f}\n")
+        f.write(f"Base L1 Check: {dim_errors_D.mean():.5f}\n")
+        
+    print(f"结果评估报告已自动同步保存至: {report_path}\n")
 
 if __name__ == "__main__":
     main()
