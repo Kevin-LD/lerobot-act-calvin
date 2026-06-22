@@ -119,8 +119,8 @@ def run_experiment(base_config_path, horizon, ablation_root):
 
 
 def main():
-    # ================= 实验矩阵配置中心 =================
-    horizons_to_test = [1, 4, 8, 16, 32, 64]
+    # ================= 实验配置中心 =================
+    horizons_to_test = [1, 2, 4, 8, 16, 32, 64]
     # horizons_to_test = [1, 4]
     
     experiments = [
@@ -183,7 +183,7 @@ def main():
         mf.write(f"- **总计运行批次**: {len(summary_results)} 场\n")
         mf.write(f"- **完成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         
-        mf.write("## 核心结果矩阵\n\n")
+        mf.write("## 核心结果\n\n")
         mf.write("| 实验模式 (Mode) | 动作时界 (Horizon) | 最终状态 (Status) | 环境 D 平均动作误差 (Avg L1 Error) | 耗时 (Minutes) |\n")
         mf.write("| :--- | :--- | :--- | :--- | :--- |\n")
         for res in summary_results:
