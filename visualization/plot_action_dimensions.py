@@ -16,8 +16,8 @@ from lerobot.policies.act.modeling_act import ACTPolicy, ACTConfig
 def parse_args():
     parser = argparse.ArgumentParser(description="Dimension-wise Action Tracking via Config-driven Reconstructed ACT")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained checkpoint (e.g., runs/run_xxx/best_act_policy.pt)")
-    parser.add_argument("--config", type=str, default="configs/train_B.yaml", help="Path to the training config file to reconstruct architecture")
-    parser.add_argument("--target_parquet", type=str, required=True, help="Path to the specific single parquet file to analyze (e.g., data/splitD/data/chunk-000/episode_00000.parquet)")
+    parser.add_argument("--config", type=str, default=None, help="Optional fallback config path if checkpoint doesn't contain it")
+    parser.add_argument("--target_parquet", type=str, required=True, help="Path to the specific single parquet file to analyze")
     parser.add_argument("--output_dir", type=str, default="figure", help="Directory to save the generated figure")
     return parser.parse_args()
 
@@ -70,25 +70,48 @@ def plot_action_matrix(gt_actions, pred_actions, output_dir, file_name):
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, file_name)
     plt.savefig(save_path, bbox_inches="tight")
-    print(f"\n图表已保存至: {save_path}")
+    print(f"\n📊 分析图表已保存至: {save_path}")
 
 def main():
     args = parse_args()
     
-    # 1. 解析模型基础配置
-    with open(args.config, "r") as f:
-        config = yaml.safe_load(f)
+    # 1. 载入 Checkpoint 并智能提取训练配置
+    print(f"正在读取 Checkpoint 核心数据: {args.checkpoint}")
+    if not os.path.exists(args.checkpoint):
+        raise FileNotFoundError(f"未找到指定的权重文件: {args.checkpoint}")
         
+    checkpoint_data = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    
+    config = None
+    if isinstance(checkpoint_data, dict) and "config" in checkpoint_data:
+        config = checkpoint_data["config"]
+        print("🎯 [Auto Config] 成功从 Checkpoint 中自动提取原始训练配置！")
+    else:
+        if args.config is None:
+            raise ValueError("该 Checkpoint 未内嵌 config，请指定 --config 手动输入训练配置文件路径！")
+        with open(args.config, "r") as f:
+            config = yaml.safe_load(f)
+            
     device = torch.device(config["infrastructure"]["device"] if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # 2. 仅针对单个 parquet 文件建立轻量化数据流
+    # 2. 自动化感知训练模式 (Standard / Filtered)
+    env_mode = config["dataset"].get("env_mode", "B").upper()
+    if "FILTERED" in env_mode:
+        print(f"🎯 [Model Mode: FILTERED] 该模型基于【单任务过滤模式 ({env_mode})】进行训练。")
+    else:
+        print(f"📦 [Model Mode: STANDARD] 该模型基于【全任务标准模式 ({env_mode})】进行训练。")
+        
+    # 3. 针对输入的单个目标 parquet 文件建立数据流（不管它是否在被过滤的目录下）
+    if not os.path.exists(args.target_parquet):
+        raise FileNotFoundError(f"未找到指定的分析文件: {args.target_parquet}")
+        
     dataset_single = SingleEpisodeDataset(
         file_path=args.target_parquet,
         action_horizon=config["dataset"]["action_horizon"]
     )
     
-    # 3. 动态重建 ACT 模型架构
+    # 4. 动态重建 ACT 策略网络架构
     print("\nReconstructing LeRobot ACT Policy Architecture...")
     input_features = {
         "observation.state": create_policy_feature("state", [15]),
@@ -115,15 +138,12 @@ def main():
     
     policy = ACTPolicy(act_config)
     
-    # 4. 导入已训练完成的 Checkpoint 权重（完全复刻 eval.py 的兼容层）
-    print(f"\nLoading trained weights from: {args.checkpoint}")
-    checkpoint_data = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    
-    if "model_state_dict" in checkpoint_data:
+    # 5. 注入模型权重
+    if isinstance(checkpoint_data, dict) and "model_state_dict" in checkpoint_data:
         policy.load_state_dict(checkpoint_data["model_state_dict"])
         orig_epoch = checkpoint_data.get("epoch", "Unknown")
         orig_step = checkpoint_data.get("global_step", "Unknown")
-        print(f"成功恢复权重！Checkpoint 产自训练 Epoch {orig_epoch} (Step {orig_step})")
+        print(f"成功恢复权重！Checkpoint 产自 Epoch {orig_epoch} (Step {orig_step})")
     else:
         policy.load_state_dict(checkpoint_data)
         print("以纯状态字典模式注入权重。")
@@ -131,27 +151,31 @@ def main():
     policy.to(device)
     policy.eval()
 
-    # 5. 进行单轨迹推演
+    # 6. 进行单轨迹前向推理
     print(f"\n启动单轨迹推演: {os.path.basename(args.target_parquet)}")
-    
-    # 直接调用修改后的函数
     gt_actions, pred_actions = collect_episode_trajectory(
         policy=policy, 
         dataset=dataset_single, 
         device=device
     )
     
-    # 6. 送入画布组件
+    # 7. 解析 Split 标签（完美兼容标准路径与过滤后的数据路径）
     pure_file_name = os.path.splitext(os.path.basename(args.target_parquet))[0]
     
     split_tag = "unknown"
-    for s in ["splitA", "splitB", "splitC", "splitD"]:
+    # 优先检测带有 filtered_ 前缀的目录名，如果未命中则匹配标准 split 名字
+    possible_splits = [
+        "filtered_splitA", "filtered_splitB", "filtered_splitC", "filtered_splitD",
+        "splitA", "splitB", "splitC", "splitD"
+    ]
+    for s in possible_splits:
         if s in args.target_parquet:
             split_tag = s
             break
             
     output_png_name = f"{split_tag}_{pure_file_name}_dim_analysis.png"
     
+    # 8. 绘图导出
     plot_action_matrix(
         gt_actions=gt_actions,
         pred_actions=pred_actions,
