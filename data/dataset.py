@@ -260,36 +260,6 @@ class CalvinABCDataset(CalvinMultiEnvDataset):
             seed=seed
         )
 
-
-if __name__ == "__main__":
-    print("====== 开始对重构后的通用架构进行多环境交叉测试 ======")
-    
-    try:
-        # 测试 1: 验证 B 模块
-        print("\n--- 正在测试环境 B (CalvinBDataset) ---")
-        train_dataset_B = CalvinBDataset(action_horizon=16, split="train", val_ratio=0.1)
-        print(f"环境 B 成功建立！总帧数: {len(train_dataset_B)}")
-        
-        # 测试 2: 验证多环境联合加载器 (CalvinABCDataset)
-        print("\n--- 正在测试 A, B, C 多环境联合数据集 (CalvinABCDataset) ---")
-        # 提示：请确保本地当前目录下或数据根目录下存在 splitA, splitB, splitC 文件夹
-        train_dataset_ABC = CalvinABCDataset(action_horizon=16, split="train", val_ratio=0.1)
-        print(f"联合数据集 ABC 成功建立！总长度: {len(train_dataset_ABC)}")
-        
-        # 测试 3: 验证联合 DataLoader 行为
-        dataloader_ABC = DataLoader(train_dataset_ABC, batch_size=4, shuffle=True, num_workers=2)
-        for batch in dataloader_ABC:
-            print("\n【测试成功】联合数据集 ABC 成功产出标准规范化数据包！")
-            print(f"  qpos 形状:         {batch['qpos'].shape}")
-            print(f"  actions 形状:      {batch['actions'].shape}")
-            print(f"  action_is_pad 形状:{batch['action_is_pad'].shape}")
-            break
-            
-    except Exception as e:
-        print(f"\n 测试流程拦截说明:\n")
-        import traceback
-        traceback.print_exc()
-
 class SingleEpisodeDataset(Dataset):
     """
     轻量化单轨迹数据集：仅加载单个指定的 .parquet 文件
@@ -374,3 +344,106 @@ class SingleEpisodeDataset(Dataset):
             "action_is_pad": torch.tensor(action_is_pad, dtype=torch.bool),
             "images": images_dict
         }
+
+
+class CalvinFilteredDataset(CalvinDataset):
+    """
+    针对过滤后单任务数据的通用基底
+    """
+    def __init__(self, data_root=None, action_horizon=16, cache_size=16, transform=None, split="train", val_ratio=0.1, seed=42, env_name="B"):
+        # 核心改动：如果未指定路径，默认指向被过滤出的单任务文件夹
+        if data_root is None:
+            data_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"filtered_split{env_name.upper()}")
+            
+        super().__init__(
+            data_root=data_root,
+            action_horizon=action_horizon,
+            cache_size=cache_size,
+            transform=transform,
+            split=split,
+            val_ratio=val_ratio,
+            seed=seed,
+            env_name=env_name
+        )
+        print(f" 🎯 [Filtered Mode Active] 已锁定单任务过滤数据源: {data_root}")
+
+
+class CalvinFilteredBDataset(CalvinFilteredDataset):
+    """专门面向【过滤单任务】环境 B (filtered_splitB) 的数据加载子类"""
+    def __init__(self, **kwargs):
+        super().__init__(env_name="B", **kwargs)
+
+
+class CalvinFilteredDDataset(CalvinFilteredDataset):
+    """专门面向【过滤单任务】测试环境 D (filtered_splitD) 的数据加载子类，用于闭环仿真或指标测算"""
+    def __init__(self, **kwargs):
+        super().__init__(env_name="D", **kwargs)
+
+
+class CalvinFilteredMultiEnvDataset(CalvinMultiEnvDataset):
+    """
+    针对过滤后多环境联合数据集的包装器
+    """
+    def __init__(self, env_names=["A", "B", "C"], data_root=None, **kwargs):
+        self.env_names = [env.upper() for env in env_names]
+        self.datasets = []
+        
+        print(f"\n================ 开始构建【过滤单任务】多环境联合数据集: {self.env_names} ================")
+        for env in self.env_names:
+            # 动态映射各自对应的 filtered_splitA, filtered_splitB ...
+            env_data_root = None if data_root is None else os.path.join(data_root, f"filtered_split{env}")
+            
+            sub_dataset = CalvinFilteredDataset(
+                data_root=env_data_root,
+                env_name=env,
+                **kwargs
+            )
+            self.datasets.append(sub_dataset)
+            
+        self.lengths = [len(ds) for ds in self.datasets]
+        self.total_frames = sum(self.lengths)
+        print(f" [Filtered MultiEnv] 联合数据集构建完毕！各环境帧数分布: {dict(zip(self.env_names, self.lengths))} | 总计可用帧数: {self.total_frames}\n")
+
+
+class CalvinFilteredABCDataset(CalvinFilteredMultiEnvDataset):
+    """专门面向 A, B, C 三个环境【过滤单任务数据】联合训练的数据加载子类"""
+    def __init__(self, data_root=None, action_horizon=16, cache_size=16, transform=None, split="train", val_ratio=0.1, seed=42):
+        super().__init__(
+            env_names=["A", "B", "C"],
+            data_root=data_root,
+            action_horizon=action_horizon,
+            cache_size=cache_size,
+            transform=transform,
+            split=split,
+            val_ratio=val_ratio,
+            seed=seed
+        )
+
+if __name__ == "__main__":
+    print("\n====== 开始对【过滤后的单任务数据集】进行多环境交叉测试 ======")
+    
+    try:
+        # 测试 1: 验证单环境过滤后的 B 模块
+        print("\n--- 正在测试过滤后的环境 B (CalvinFilteredBDataset) ---")
+        filtered_dataset_B = CalvinFilteredBDataset(action_horizon=16, split="train", val_ratio=0.1)
+        print(f"✨ 过滤环境 B 成功建立！可用单任务总帧数: {len(filtered_dataset_B)}")
+        
+        # 测试 2: 验证过滤后的 A, B, C 多环境联合加载器
+        print("\n--- 正在测试过滤后的 A, B, C 多环境联合数据集 (CalvinFilteredABCDataset) ---")
+        filtered_dataset_ABC = CalvinFilteredABCDataset(action_horizon=16, split="train", val_ratio=0.1)
+        print(f"✨ 过滤联合数据集 ABC 成功建立！总计单任务帧数: {len(filtered_dataset_ABC)}")
+        
+        # 测试 3: 验证过滤后的联合 DataLoader 数据流动性
+        filtered_dataloader_ABC = DataLoader(filtered_dataset_ABC, batch_size=4, shuffle=True, num_workers=2)
+        for batch in filtered_dataloader_ABC:
+            print("\n🔥【💪 测试完美通过】过滤后的单任务联合数据集成功产出标准数据包！")
+            print(f" ├─ qpos 形状:         {batch['qpos'].shape}       (预期: [batch, 15])")
+            print(f" ├─ actions 形状:      {batch['actions'].shape}    (预期: [batch, horizon, 7])")
+            print(f" ├─ action_is_pad 形状:{batch['action_is_pad'].shape} (预期: [batch, horizon])")
+            print(f" └─ images['image'] 形状: {batch['images']['image'].shape} (预期: [batch, 3, H, W])")
+            break
+            
+    except Exception as e:
+        print(f"\n ❌ 测试失败，错误诊断说明如下:\n")
+        import traceback
+        traceback.print_exc()

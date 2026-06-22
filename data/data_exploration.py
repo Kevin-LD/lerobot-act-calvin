@@ -11,12 +11,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from dataset import CalvinBDataset, CalvinDDataset
+from dataset import CalvinBDataset, CalvinDDataset, CalvinFilteredDDataset
 
 def main():
     print("Initializing CalvinBDataset for data exploration...")
     # 实例化数据集（action_horizon 设为 16 以对齐 ACT 算法）
-    dataset = CalvinDDataset(action_horizon=16)
+    dataset = CalvinFilteredDDataset(action_horizon=16)
     
     # 抽取特定帧进行可视化验证
     sample_idx = 0
@@ -69,7 +69,7 @@ def main():
     figure_dir = os.path.join(root_dir, "figure")
     os.makedirs(figure_dir, exist_ok=True)
     
-    output_path = os.path.join(figure_dir, "data_exploration_output_D.png")
+    output_path = os.path.join(figure_dir, "data_exploration_output_D_filtered.png")
     plt.savefig(output_path, dpi=150)
     plt.close()
     
