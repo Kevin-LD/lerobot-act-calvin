@@ -11,7 +11,12 @@ import wandb
 from datetime import datetime
 from tqdm import tqdm
 
-from data.dataset import CalvinBDataset, CalvinABCDataset
+from data.dataset import (
+    CalvinBDataset, 
+    CalvinABCDataset, 
+    CalvinFilteredBDataset, 
+    CalvinFilteredABCDataset
+)
 from lerobot.policies.act.modeling_act import ACTPolicy, ACTConfig
 from utils.utils import build_lerobot_batch, evaluate_policy, evaluate_policy_ema, create_policy_feature
 
@@ -55,15 +60,22 @@ def main():
         config=config
     )
     
+    # 分流加载不同的数据集类以适配多环境联合训练或单环境过滤训练的需求
     env_mode = config["dataset"].get("env_mode", "B").upper()
     if env_mode == "ABC":
         dataset_cls = CalvinABCDataset
-        print(" [Mode: ABC] 检测到多环境联合训练配置，正在组装 A + B + C 数据流...")
+        print(" [Mode: ABC] 检测到多环境联合训练配置，正在组装 A + B + C 原始数据流...")
     elif env_mode == "B":
         dataset_cls = CalvinBDataset
-        print(" [Mode: B] 检测到单一环境训练配置，正在加载环境 B 数据流...")
+        print(" [Mode: B] 检测到单一环境训练配置，正在加载环境 B 原始数据流...")
+    elif env_mode == "FILTERED_B":
+        dataset_cls = CalvinFilteredBDataset
+        print(" 🎯 [Mode: FILTERED_B] 检测到【单任务过滤】配置，正在加载环境 B 纯净单任务数据流...")
+    elif env_mode == "FILTERED_ABC":
+        dataset_cls = CalvinFilteredABCDataset
+        print(" 🎯 [Mode: FILTERED_ABC] 检测到【单任务过滤】多环境联合配置，正在组装 A + B + C 纯净单任务数据流...")
     else:
-        raise ValueError(f" 无法识别的 env_mode: '{env_mode}'。合法的选项为 ['B', 'ABC']")
+        raise ValueError(f" 无法识别的 env_mode: '{env_mode}'。合法的选项为 ['B', 'ABC', 'FILTERED_B', 'FILTERED_ABC']")
 
     print("Loading dataset...")
     base_train_dataset = dataset_cls(
