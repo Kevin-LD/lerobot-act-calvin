@@ -289,3 +289,88 @@ if __name__ == "__main__":
         print(f"\n 测试流程拦截说明:\n")
         import traceback
         traceback.print_exc()
+
+class SingleEpisodeDataset(Dataset):
+    """
+    轻量化单轨迹数据集：仅加载单个指定的 .parquet 文件
+    """
+    def __init__(self, file_path, action_horizon=16, transform=None):
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"未找到指定的 Parquet 文件: {file_path}")
+            
+        self.file_path = file_path
+        self.action_horizon = action_horizon
+        
+        self.df = pd.read_parquet(file_path)
+        self.total_frames = len(self.df)
+        
+        self.transform = transform if transform is not None else transforms.Compose([
+            transforms.ToTensor(),
+        ])
+        
+        self.image_cols = ["image", "wrist_image"]
+        self.state_col = "state"
+        self.action_col = "actions"
+        
+        print(f"[SingleEpisodeDataset] 成功单点加载: {os.path.basename(file_path)} | 总帧数: {self.total_frames}")
+
+    def __len__(self):
+        return self.total_frames
+
+    def _parse_vector_data(self, col_name, frame_idx):
+        val = self.df.iloc[frame_idx][col_name]
+        return np.array(val, dtype=np.float32)
+
+    def _parse_image_data(self, col_name, frame_idx):
+        val = self.df.iloc[frame_idx][col_name]
+        if isinstance(val, dict):
+            if 'bytes' in val and val['bytes'] is not None:
+                return Image.open(io.BytesIO(val['bytes'])).convert("RGB")
+            elif 'path' in val and val['path'] is not None:
+                return Image.open(val['path']).convert("RGB")
+        if isinstance(val, (bytes, bytearray)):
+            return Image.open(io.BytesIO(val)).convert("RGB")
+        elif isinstance(val, np.ndarray):
+            return Image.fromarray(val).convert("RGB")
+        else:
+            raise TypeError(f"无法解析的图像格式: {type(val)}")
+
+    def __getitem__(self, idx):
+        # 帧索引与 Dataset 的 idx 完美等价 1:1 映射
+        frame_idx = idx
+        
+        # 1. 提取当前帧状态 (qpos)
+        qpos = self._parse_vector_data(self.state_col, frame_idx)
+        
+        # 2. 提取当前帧双路图像
+        images_dict = {}
+        for img_col in self.image_cols:
+            pil_img = self._parse_image_data(img_col, frame_idx)
+            images_dict[img_col] = self.transform(pil_img)
+            
+        # 3. 规范化动作分片提取（带时序自适应边界 Padding）
+        sample_act = self._parse_vector_data(self.action_col, 0)
+        action_dim = sample_act.shape[0]
+        
+        actions_list = []
+        action_is_pad_list = []
+        
+        for step in range(self.action_horizon):
+            target_frame = frame_idx + step
+            if target_frame < self.total_frames:
+                act = self._parse_vector_data(self.action_col, target_frame)
+                action_is_pad_list.append(False)
+            else:
+                act = np.zeros(action_dim, dtype=np.float32)
+                action_is_pad_list.append(True)
+            actions_list.append(act)
+            
+        actions = np.stack(actions_list, axis=0)
+        action_is_pad = np.array(action_is_pad_list, dtype=bool)
+        
+        return {
+            "qpos": torch.tensor(qpos, dtype=torch.float32),
+            "actions": torch.tensor(actions, dtype=torch.float32),
+            "action_is_pad": torch.tensor(action_is_pad, dtype=torch.bool),
+            "images": images_dict
+        }
