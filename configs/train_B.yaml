@@ -6,7 +6,7 @@ infrastructure:
 dataset:
   env_mode: "B"  # env_mode: "ABC"  # 可选 'B'（单环境）或 'ABC'（多环境联合训练）
   data_root: "data/splitB"
-  action_horizon: 16 # ACT 预测的时间步长
+  action_horizon: 4 # ACT 预测的时间步长
   batch_size: 64
   num_workers: 16
 

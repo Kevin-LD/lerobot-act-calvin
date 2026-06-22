@@ -1,10 +1,10 @@
 infrastructure:
   seed: 42
   device: "cuda"
-  save_dir: "runs/run"  # 实验脚本会自动在 save_dir 后添加时间戳以区分不同实验
+  save_dir: "runs/run_filtered_ABC"  # 实验脚本会自动在 save_dir 后添加时间戳以区分不同实验
 
 dataset:
-  env_mode: "ABC"  # env_mode: "B"  # 可选 'B'（单环境）或 'ABC'（多环境联合训练）
+  env_mode: "FILTERED_ABC"  # env_mode: "FILTERED_B"  # 可选 'FILTERED_B'（单环境）或 'FILTERED_ABC'（多环境联合训练）
   data_root: "data"
   action_horizon: 4 # ACT 预测的时间步长
   batch_size: 64
@@ -19,8 +19,8 @@ model:
   lr: 1e-4            # Transformer 的学习率
   lr_backbone: 1e-5   # 视觉骨干网络的学习率
   weight_decay: 1e-4
-  num_epochs: 1
-  eval_freq: 1000
+  num_epochs: 20
+  eval_freq: 500
 
 wandb:
   project: "lerobot-act-calvin"
