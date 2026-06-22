@@ -2,6 +2,8 @@
 data/*
 # 不忽略 Python 脚本
 !data/*.py
+video/
+video_tasks/
 
 # IDE
 .vscode/
