@@ -19,9 +19,13 @@ from lerobot.policies.act.modeling_act import ACTPolicy, ACTConfig
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Closed-Loop Success Rate Evaluation for ACT on CALVIN Environment D")
+    parser = argparse.ArgumentParser(description="Closed-Loop Success Rate Evaluation for ACT on CALVIN Environments")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained checkpoint (e.g., runs/run_xxx/best_act_policy.pt)")
     parser.add_argument("--config", type=str, default=None, help="Optional fallback config path if checkpoint doesn't contain it")
+    
+    # 环境场景选择参数
+    parser.add_argument("--scene", type=str, default="D", choices=["A", "B", "C", "D", "a", "b", "c", "d"],
+                        help="The evaluation scene environment: A, B, C, or D (default: D)")
     
     # 仿真特有参数
     parser.add_argument("--task_name", type=str, default="open_drawer", 
@@ -65,6 +69,7 @@ def preprocess_image(img_array, target_size=(200, 200)):
 
 def main():
     args = parse_args()
+    target_scene = args.scene.upper()
     
     # 1. 载入 Checkpoint 权重与配置
     print(f"正在读取 Checkpoint 核心数据: {args.checkpoint}")
@@ -125,14 +130,18 @@ def main():
 
     # 3. 动态唤醒 CALVIN 仿真环境
     config_dir = "/root/autodl-tmp/calvin_env/conf"
-    print("\n🚀 正在通过 Hydra 拼装仿真世界资产...")
+    print(f"\n🚀 正在通过 Hydra 拼装仿真世界资产，目标测试环境: Scene {target_scene} ...")
     try:
         if GlobalHydra.instance().is_initialized():
             GlobalHydra.instance().clear()
         with initialize_config_dir(config_dir=config_dir, version_base=None, job_name="eval_calvin_env"):
             cfg = compose(
                 config_name="config_data_collection",
-                overrides=["env.show_gui=False", "cameras=static_and_gripper"]
+                overrides=[
+                    "env.show_gui=False", 
+                    "cameras=static_and_gripper",
+                    f"scene=calvin_scene_{target_scene}" # 🎯 动态注入命令行指定的场景
+                ]
             )
         
         env = PlayTableSimEnv(
@@ -146,14 +155,14 @@ def main():
             use_scene_info=True,
             use_egl=False,
         )
-        print("🎉 CALVIN 物理仿真环境成功拉起！")
+        print(f"🎉 CALVIN 物理仿真环境(Scene {target_scene})成功拉起！")
     except Exception:
         print("❌ 环境组装阶段崩溃：")
         traceback.print_exc()
         return
 
     # 4. 闭环评测循环 (Closed-Loop Rollouts)
-    print(f"\n评估启动：目标任务【{args.task_name}】 | 总计轮次: {args.num_rollouts} | 单轮最大步数: {args.max_steps}")
+    print(f"\n评估启动：测试环境【Scene {target_scene}】| 目标任务【{args.task_name}】 | 总计轮次: {args.num_rollouts} | 单轮最大步数: {args.max_steps}")
     success_count = 0
 
     try:
@@ -240,11 +249,6 @@ def main():
                     rollout_success = True
                     print(f" 🌟 [SUCCESS] 任务【{args.task_name}】在第 {t} 步提早宣告成功！")
                     break
-                
-                if is_success:
-                    rollout_success = True
-                    print(f" 🌟 [SUCCESS] 任务【{args.task_name}】在第 {t} 步提早宣告成功！")
-                    break
             
             if rollout_success:
                 success_count += 1
@@ -257,6 +261,7 @@ def main():
         print("                📊 SIMULATION SUCCESS REPORT                ")
         print("="*60)
         print(f" 评估模型:      {os.path.basename(args.checkpoint)}")
+        print(f" 测试仿真场景:  Scene {target_scene}")
         print(f" 目标测试任务:  {args.task_name}")
         print(f" 动作集成模式:  {args.mode.upper()} (k={args.k if args.mode=='ema' else 'N/A'})")
         print(f" 测试总轮次:    {args.num_rollouts} 轮")
@@ -264,10 +269,11 @@ def main():
         print(f" 🎯 仿真最终成功率 (Success Rate): {success_rate:.2f}%")
         print("="*60)
         
-        # 保存本地报告
-        report_path = os.path.join(os.path.dirname(args.checkpoint), f"eval_success_rate_{args.task_name}_{args.mode}.txt")
+        # 保存本地报告 (文件名包含 scene 标识)
+        report_path = os.path.join(os.path.dirname(args.checkpoint), f"eval_success_rate_{args.task_name}_{args.mode}_scene_{target_scene}.txt")
         with open(report_path, "w") as f:
             f.write(f"Checkpoint: {args.checkpoint}\n")
+            f.write(f"Evaluation Scene: Scene {target_scene}\n")
             f.write(f"Target Task: {args.task_name}\n")
             f.write(f"Inference Mode: {args.mode} (k={args.k})\n")
             f.write(f"Total Rollouts: {args.num_rollouts}\n")
@@ -279,11 +285,7 @@ def main():
         print("❌ 运行期间发生异常崩溃：")
         traceback.print_exc()
     finally:
-        if 'env' in locals() and env is not None:
-            try:
-                env.close()
-            except Exception:
-                pass
+        env = None
 
 
 if __name__ == "__main__":

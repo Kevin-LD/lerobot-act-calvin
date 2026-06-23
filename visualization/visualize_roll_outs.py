@@ -25,6 +25,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Record Success and Failure Videos for ACT on CALVIN")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained checkpoint")
     parser.add_argument("--config", type=str, default=None, help="Optional fallback config path")
+    
+    # 环境场景选择参数
+    parser.add_argument("--scene", type=str, default="D", choices=["A", "B", "C", "D", "a", "b", "c", "d"],
+                        help="The evaluation scene environment: A, B, C, or D (default: D)")
+    
     parser.add_argument("--max_steps", type=int, default=360, help="Max simulation steps per rollout")
     parser.add_argument("--mode", type=str, default="ema", choices=["none", "ema"])
     parser.add_argument("--k", type=float, default=0.01)
@@ -73,6 +78,7 @@ def save_video(frames, save_path, fps=30):
 
 def main():
     args = parse_args()
+    target_scene = args.scene.upper()
     
     # 1. 加载模型与配置
     checkpoint_data = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -104,12 +110,20 @@ def main():
     policy.load_state_dict(checkpoint_data["model_state_dict"] if "model_state_dict" in checkpoint_data else checkpoint_data)
     policy.to(device).eval()
 
-    # 3. 唤醒仿真环境
+    # 3. 唤醒仿真环境 (注入动态 Scene 资产)
     config_dir = "/root/autodl-tmp/calvin_env/conf"
+    print(f"\n🚀 正在通过 Hydra 拼装仿真世界资产，目标测试环境: Scene {target_scene} ...")
     if GlobalHydra.instance().is_initialized():
         GlobalHydra.instance().clear()
     with initialize_config_dir(config_dir=config_dir, version_base=None, job_name="eval_calvin_video"):
-        cfg = compose(config_name="config_data_collection", overrides=["env.show_gui=False", "cameras=static_and_gripper"])
+        cfg = compose(
+            config_name="config_data_collection", 
+            overrides=[
+                "env.show_gui=False", 
+                "cameras=static_and_gripper",
+                f"scene=calvin_scene_{target_scene}"  # 🎯 动态注入命令行指定的场景
+            ]
+        )
     
     env = PlayTableSimEnv(
         robot_cfg=cfg.robot, seed=cfg.seed, use_vr=False, bullet_time_step=cfg.env.bullet_time_step,
@@ -124,13 +138,13 @@ def main():
     saved_failure = False
     rollout_idx = 0
 
-    print(f"\n🎬 视频录制启动！目标：成功与失败视频各一份。")
+    print(f"\n🎬 视频录制启动！测试场景【Scene {target_scene}】| 目标：成功与失败视频各一份。")
     
     try:
         # 循环跑 rollout，直到集齐成功和失败视频，或者达到最大尝试次数（如 30 次）
         while (not saved_success or not saved_failure) and rollout_idx < 30:
             print(f"\n进展 -> 成功视频: {'[已捕获]' if saved_success else '[寻找中]'} | 失败视频: {'[已捕获]' if saved_failure else '[寻找中]'}")
-            print(f"🏃 正在运行第 {rollout_idx + 1} 轮尝试...")
+            print(f"🏃 正在测试环境 Scene {target_scene} 下运行第 {rollout_idx + 1} 轮尝试...")
             
             current_seed = int(config["infrastructure"]["seed"] + rollout_idx * 100)
             env.seed(current_seed)
@@ -202,13 +216,13 @@ def main():
                     print(f" 🌟 [SUCCESS] 第 {rollout_idx + 1} 轮成功完成！")
                     break
             
-            # 4. 分流保存逻辑
+            # 4. 分流保存逻辑 (视频文件名后缀携带 target_scene)
             if rollout_success and not saved_success:
-                video_path = os.path.join(video_dir, "success_rollout.mp4")
+                video_path = os.path.join(video_dir, f"success_rollout_scene_{target_scene}.mp4")
                 save_video(current_rollout_frames, video_path, fps=30)
                 saved_success = True
             elif not rollout_success and not saved_failure:
-                video_path = os.path.join(video_dir, "failed_rollout.mp4")
+                video_path = os.path.join(video_dir, f"failed_rollout_scene_{target_scene}.mp4")
                 save_video(current_rollout_frames, video_path, fps=30)
                 saved_failure = True
                 
