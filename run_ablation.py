@@ -27,7 +27,7 @@ def run_experiment(base_config_path, horizon, ablation_root):
     config["infrastructure"]["save_dir"] = os.path.join(ablation_root, target_prefix)
     config["wandb"]["name"] = f"act_{env_mode}_horizon_{horizon}"
 
-    # 4. 生成临时配置文件供 train.py 和 eval.py 共享读取
+    # 4. 生成临时配置文件供 train.py 和 action_loss_eval.py 共享读取
     tmp_config_path = f"configs/tmp_ablation_{env_mode}_H{horizon}.yaml"
     os.makedirs("configs", exist_ok=True)
     with open(tmp_config_path, "w", encoding="utf-8") as f:
@@ -63,7 +63,7 @@ def run_experiment(base_config_path, horizon, ablation_root):
             candidates.sort()
             actual_save_dir = os.path.join(ablation_root, candidates[-1])
 
-    # 7. 自动化评估阶段 (eval.py)
+    # 7. 自动化评估阶段 (action_loss_eval.py)
     eval_success = False
     if train_success and actual_save_dir:
         checkpoint_path = os.path.join(actual_save_dir, "best_act_policy.pt")
@@ -72,7 +72,7 @@ def run_experiment(base_config_path, horizon, ablation_root):
             print(f"开始触发零样本环境 D 泛化评估...")
             
             cmd_eval = [
-                sys.executable, "eval.py", 
+                sys.executable, "action_loss_eval.py", 
                 "--checkpoint", checkpoint_path, 
                 "--config", tmp_config_path,
                 "--mode", "none"
@@ -88,7 +88,7 @@ def run_experiment(base_config_path, horizon, ablation_root):
         if train_success:
             print(f"训练看似成功，但在 {ablation_root} 下未找到以 {target_prefix} 开头的真实输出目录。")
 
-    # 8. 回读 eval.py 生成的局部报告指标
+    # 8. 回读 action_loss_eval.py 生成的局部报告指标
     error_val = None
     if eval_success and actual_save_dir:
         report_file = os.path.join(actual_save_dir, "eval_D_report_none.txt")
@@ -120,13 +120,13 @@ def run_experiment(base_config_path, horizon, ablation_root):
 
 def main():
     # ================= 实验配置中心 =================
-    horizons_to_test = [1, 2, 4, 8, 16, 32, 64]
+    horizons_to_test = [1, 2, 4, 8, 16]
     # horizons_to_test = [1, 4]
     
     experiments = [
         # {"name": "test", "config": "configs/overfit_sanity.yaml"},
-        {"name": "B", "config": "configs/train_B.yaml"},
-        {"name": "ABC", "config": "configs/train_ABC.yaml"}
+        {"name": "B", "config": "configs/train_filtered_B.yaml"},
+        {"name": "ABC", "config": "configs/train_filtered_ABC.yaml"}
     ]
     # ===================================================
 

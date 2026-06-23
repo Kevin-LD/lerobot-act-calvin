@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-file = "data/filtered_splitD/data/chunk-000/episode_000101.parquet"
+file = "data/splitD/data/chunk-000/episode_000000.parquet"
 
 print(f"正在读取文件: {file}\n")
 df = pd.read_parquet(file)
