@@ -1,0 +1,56 @@
+# Core DL
+torch==2.10.0
+torchvision==0.25.0
+accelerate==1.14.0
+
+# LeRobot
+lerobot==0.4.4
+
+# CALVIN
+-e git+https://github.com/mees/calvin_env.git@797142c588c21e76717268b7b430958dbd13bf48#egg=calvin_env
+-e git+https://github.com/lukashermann/tacto.git@dd53360d9a8c186f0d6439372ec0be0fa5e21731#egg=tacto
+
+PyOpenGL @ git+https://github.com/mmatl/pyopengl.git@76d1261adee2d3fd99b418e75b0416bb7d2865e6
+
+# Config
+hydra-core==1.3.3
+hydra-colorlog==1.2.0
+omegaconf==2.3.1
+draccus==0.10.0
+
+# Data
+datasets==4.8.5
+pyarrow==24.0.0
+pandas==2.3.3
+numpy==2.2.6
+
+# Vision
+opencv-python==4.13.0.92
+Pillow==12.2.0
+imageio==2.37.3
+imageio-ffmpeg==0.6.0
+
+# Simulation
+gym==0.26.2
+gymnasium==1.3.0
+pybullet==3.2.7
+pyrender==0.1.45
+trimesh==4.12.2
+urdfpy==0.0.22
+
+# Training
+einops==0.8.2
+diffusers==0.35.2
+huggingface-hub==0.35.3
+safetensors==0.8.0
+
+# Logging
+wandb==0.24.2
+rerun-sdk==0.26.2
+rich==15.0.0
+tqdm==4.68.3
+
+# Scientific
+scipy==1.15.3
+matplotlib==3.10.9
+numba==0.65.1
